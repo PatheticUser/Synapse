@@ -136,7 +136,7 @@ def get_current_datetime() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 tools = [
-    tavily_search, 
+    tavily_search,
     wiki_tool, 
     arxiv_tool, 
     youtube_tool, 
@@ -224,26 +224,42 @@ def main():
                 interrupt_payload = state_snapshot.tasks[0].interrupts[0].value if state_snapshot.tasks and state_snapshot.tasks[0].interrupts else {}
                 action_requests = interrupt_payload.get("action_requests", [])
                 decisions = [{"type": "approve"} for _ in action_requests]
-                state = agent.invoke(Command(resume={"decisions": decisions}), config=config)
+                
+                print("\nAgent: ", end="", flush=True)
+                for chunk in agent.stream(Command(resume={"decisions": decisions}), config=config, stream_mode="messages"):
+                    if isinstance(chunk, tuple) and hasattr(chunk[0], "content") and chunk[0].content:
+                        print(chunk[0].content, end="", flush=True)
+                print()
             elif state_snapshot.next and user_input:
                 from langgraph.types import Command
                 interrupt_payload = state_snapshot.tasks[0].interrupts[0].value if state_snapshot.tasks and state_snapshot.tasks[0].interrupts else {}
                 action_requests = interrupt_payload.get("action_requests", [])
                 decisions = [{"type": "reject", "message": user_input} for _ in action_requests]
-                state = agent.invoke(Command(resume={"decisions": decisions}), config=config)
+                
+                print("\nAgent: ", end="", flush=True)
+                for chunk in agent.stream(Command(resume={"decisions": decisions}), config=config, stream_mode="messages"):
+                    if isinstance(chunk, tuple) and hasattr(chunk[0], "content") and chunk[0].content:
+                        print(chunk[0].content, end="", flush=True)
+                print()
             else:
                 # If there's input, invoke with new message
-                state = agent.invoke(
+                print("\nAgent: ", end="", flush=True)
+                for chunk in agent.stream(
                     {"messages": [HumanMessage(content=user_input)]},
-                    config=config
-                )
+                    config=config,
+                    stream_mode="messages"
+                ):
+                    if isinstance(chunk, tuple) and hasattr(chunk[0], "content") and chunk[0].content:
+                        print(chunk[0].content, end="", flush=True)
+                print()
                 
             # Check if it was interrupted for Human-in-the-Loop
             state_snapshot = agent.get_state(config)
             if state_snapshot.next:
                 # The agent wants to execute a tool (HITL)
-                latest = state["messages"][-1]
-                if hasattr(latest, 'tool_calls') and latest.tool_calls:
+                messages = state_snapshot.values.get("messages", [])
+                latest = messages[-1] if messages else None
+                if latest and hasattr(latest, 'tool_calls') and latest.tool_calls:
                     print("\n[HITL Middleware] Agent wants to call tools:")
                     for tc in latest.tool_calls:
                         print(f"  - {tc['name']}: {tc['args']}")
@@ -251,9 +267,8 @@ def main():
                 else:
                     print("\n[HITL Middleware] Agent paused execution. Press Enter to continue.")
             else:
-                # Finished executing
-                latest_message = state["messages"][-1]
-                print(f"Agent: {latest_message.content}")
+                # Finished executing - already streamed, do nothing special here
+                pass
             
         except Exception as e:
             print(f"Error: {e}")
